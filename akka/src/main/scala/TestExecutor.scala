@@ -11,34 +11,37 @@ import se.scalablesolutions.akka.util.Logging
 import Utils._
 
 case object STOP_RUNNING
-case object START_RUNNING
+case class START_RUNNING(runId: Int)
 
 class EchoActor extends Actor {
   def receive = {
     case m: TestMessage => 
-      println("Got TestMessage: " + m)
+      //println("Got TestMessage: " + m)
       self.reply(m)
   }
 }
 
 class TestExecutor(settings: TestSetting) extends Logging {
   def execute() {
+    val remoteLog = net.lag.logging.Logger.get(classOf[RemoteServer].getName)
+    remoteLog.setLevel(java.util.logging.Level.WARNING)
+
     val server = new RemoteServer
-    //server.start("localhost", settings.serverport)
-    server.start("localhost", 9999)
+    server.start("localhost", settings.serverport)
     log.info("Remote node started")
     server.register("server", actorOf[EchoActor])
     log.info("Remote actor registered and started")
+
+    val a = actorOf(new ClientActor).start
     (1 to settings.numruns).foreach(runNum => {
-      val latch = new CountDownLatch(1)
-      val a = actorOf(new ClientActor(runNum, latch)).start
-      a ! START_RUNNING
+      a ! START_RUNNING(runNum)
       Thread.sleep(settings.runtime)
       a ! STOP_RUNNING
-      latch.await()
     })
+    a.stop
+    println("Execute is done")
   }
-  class ClientActor(runId: Int, latch: CountDownLatch) extends Actor {
+  class ClientActor extends Actor {
     val nodes = settings.nodes.toArray
     val random = new scala.util.Random
 
@@ -53,8 +56,8 @@ class TestExecutor(settings: TestSetting) extends Logging {
       val nextN = nextNode()
       val server = serverMap.getOrElseUpdate(nextN, { 
           println("Made new actor ref")
-          RemoteClient.actorFor("server", nextN, 9999 /*settings.serverport */)})
-      println("server ! msg")
+          RemoteClient.actorFor("server", nextN, settings.serverport)})
+      //println("server ! msg")
       server ! TestMessage(runId, System.currentTimeMillis, settings.payload)
       msgsSent += 1
     }
@@ -62,21 +65,24 @@ class TestExecutor(settings: TestSetting) extends Logging {
     private var msgsSent = 0
     private var msgsRecv = 0
     private var startTime: Long = _
+    private var runId: Int = _
 
     def receive = {
       case m @ TestMessage(id, _, _) if (id == runId) =>
-        println("Received response to test Message: " + m)
+        //println("Received response to test Message: " + m)
         msgsRecv += 1
         sendNextMessage()
-      case START_RUNNING =>
-        println("Starting run " + runId)
+      case TestMessage(_, _, _) =>
+        // dropped message from prev round
+      case START_RUNNING(id) =>
+        println("Starting run " + id)
+        runId = id
         startTime = System.currentTimeMillis
-        val windowSize = settings.windowsize
-        (1 to windowSize).foreach(i => sendNextMessage())
+        (1 to settings.windowsize).foreach(i => sendNextMessage())
       case STOP_RUNNING =>
         reportResult(TestResult(settings.testName, runId, startTime, System.currentTimeMillis, msgsSent, msgsRecv))
-        latch.countDown()
-        exit()
+        msgsSent = 0
+        msgsRecv = 0
     }
   }
 }
