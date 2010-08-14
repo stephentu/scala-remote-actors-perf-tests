@@ -38,7 +38,6 @@ class TestExecutor(settings: TestSetting) extends Logging {
       Thread.sleep(settings.runtime)
       a ! STOP_RUNNING
     })
-    a.stop
     println("Execute is done")
   }
   class ClientActor extends Actor {
