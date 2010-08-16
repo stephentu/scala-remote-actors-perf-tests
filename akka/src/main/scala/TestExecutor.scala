@@ -26,13 +26,15 @@ class TestExecutor(settings: TestSetting) extends Logging {
 
 
     val server = new RemoteServer
-    server.start("localhost", settings.serverport)
+    server.start(settings.localhost, settings.serverport)
     log.info("Remote node started")
     server.register("server", actorOf[EchoActor])
     log.info("Remote actor registered and started")
 
     val remoteLog = net.lag.logging.Logger.get(classOf[RemoteServer].getName)
     remoteLog.setLevel(java.util.logging.Level.WARNING)
+
+    Thread.sleep(settings.delaytime)
 
     val a = actorOf(new ClientActor).start
     (1 to settings.numruns).foreach(runNum => {
